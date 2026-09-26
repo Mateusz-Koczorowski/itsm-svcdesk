@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from svcdesk import sla
+from svcdesk import sla, ticket_events
 from svcdesk.store import default_store
 
 app = FastAPI(title="svcdesk", docs_url=None, redoc_url=None, openapi_url=None)
@@ -291,3 +291,10 @@ def reopen(ticket_id: str, request: Request) -> dict:
     ticket["closed_at"] = None
     store.update(ticket)
     return ticket
+
+
+# ---------- Lab 2: ticket lifecycle stream (METRIC-SPEC.md section 7) ----------
+
+@app.get("/dora/ticket-events")
+def dora_ticket_events() -> list[dict]:
+    return ticket_events.stream(store.all())
