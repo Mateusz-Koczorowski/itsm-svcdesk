@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from svcdesk import sla, ticket_events
+from svcdesk import dora, sla, ticket_events
 from svcdesk.store import default_store
 
 app = FastAPI(title="svcdesk", docs_url=None, redoc_url=None, openapi_url=None)
@@ -291,6 +291,20 @@ def reopen(ticket_id: str, request: Request) -> dict:
     ticket["closed_at"] = None
     store.update(ticket)
     return ticket
+
+
+# ---------- Lab 2: DORA metrics (METRIC-SPEC.md section 6) ----------
+
+@app.post("/dora/metrics")
+async def dora_metrics(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except Exception:
+        raise ApiError(422, "validation", "body must be valid JSON")
+    try:
+        return dora.compute(body)
+    except dora.LogError as exc:
+        raise ApiError(422, "validation", str(exc))
 
 
 # ---------- Lab 2: ticket lifecycle stream (METRIC-SPEC.md section 7) ----------
