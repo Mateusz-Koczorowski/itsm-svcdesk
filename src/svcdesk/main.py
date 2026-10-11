@@ -13,10 +13,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from svcdesk import dora, sla, ticket_events
+from svcdesk import dora, kb, observability, sla, ticket_events
 from svcdesk.store import default_store
 
 app = FastAPI(title="svcdesk", docs_url=None, redoc_url=None, openapi_url=None)
+observability.install(app)  # Lab 3: the request histogram and GET /metrics
+app.include_router(kb.router)  # Lab 3: GET /kb/search
 store = default_store()
 
 REOPEN_WINDOW = timedelta(days=7)

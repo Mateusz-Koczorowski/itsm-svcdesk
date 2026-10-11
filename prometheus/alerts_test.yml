@@ -1,0 +1,97 @@
+# ai-generated: 90% - Claude generated the tests and found each first firing evaluation with promtool 3.15.0; I reviewed the edges
+# prometheus/alerts_test.yml - promtool unit tests of alerts.yml (MONITORING-SPEC.md M-20, M-21).
+#   docker run --rm -v "${PWD}/prometheus:/p" -w /p --entrypoint promtool prom/prometheus:v3.15.0 test rules alerts_test.yml
+#
+# One test per declared alert. /kb/search gets 10 requests per second (600 per minute), healthy for long_window + 10m,
+# then a burn at TWICE the alert's burn rate; /tickets/{id} gets another 10 per second of noise. Each test asserts
+# both edges, found with promtool itself: the alert is NOT firing one evaluation before its first firing evaluation
+# (kills `for - 5m` and `threshold / 1.5`) and IS firing at it (kills `for + 5m` and `threshold x 1.5`).
+# A note on the 'a+bxn' notation: n+1 samples a, a+b, ..., a+n*b, one per interval.
+rule_files:
+- alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}
+    values: 0+600x70 42513.6+513.6x36
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}
+    values: 0x70 86.4+86.4x36
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{id}", http_response_status_code="200"}
+    values: 0+600x107
+  alert_rule_test:
+  - eval_time: 1h41m
+    alertname: KbSearchAvailabilityFastBurn
+    exp_alerts: []
+  - eval_time: 1h42m
+    alertname: KbSearchAvailabilityFastBurn
+    exp_alerts:
+    - exp_labels:
+        service: svcdesk
+        slo: availability
+        severity: P1
+      exp_annotations:
+        summary: '/kb/search is failing 14x faster than its 0.5 % error budget allows: 2 % of the 30-day budget gone in the last hour. Check kb-index (/stats) and svcdesk''s 502s.'
+- interval: 1m
+  input_series:
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}
+    values: 0+600x370 222564+564x189
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}
+    values: 0x370 36+36x189
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{id}", http_response_status_code="200"}
+    values: 0+600x560
+  alert_rule_test:
+  - eval_time: 9h14m
+    alertname: KbSearchAvailabilitySlowBurn
+    exp_alerts: []
+  - eval_time: 9h15m
+    alertname: KbSearchAvailabilitySlowBurn
+    exp_alerts:
+    - exp_labels:
+        service: svcdesk
+        slo: availability
+        severity: P2
+      exp_annotations:
+        summary: /kb/search errors have burned 5 % of the 30-day availability budget in 6 hours; look at it during working hours.
+- interval: 1m
+  input_series:
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}
+    values: 0+600x107
+  - series: http_server_request_duration_seconds_bucket{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200", le="0.2"}
+    values: 0+600x70 42427.2+427.2x36
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{id}", http_response_status_code="200"}
+    values: 0+600x107
+  alert_rule_test:
+  - eval_time: 1h41m
+    alertname: KbSearchLatencyFastBurn
+    exp_alerts: []
+  - eval_time: 1h42m
+    alertname: KbSearchLatencyFastBurn
+    exp_alerts:
+    - exp_labels:
+        service: svcdesk
+        slo: latency
+        severity: P2
+      exp_annotations:
+        summary: 'More than 14 % of /kb/search answers are slower than 0.2 s: kb-index is degraded; searches still answer.'
+- interval: 1m
+  input_series:
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}
+    values: 0+600x560
+  - series: http_server_request_duration_seconds_bucket{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200", le="0.2"}
+    values: 0+600x370 222528+528x189
+  - series: http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{id}", http_response_status_code="200"}
+    values: 0+600x560
+  alert_rule_test:
+  - eval_time: 9h14m
+    alertname: KbSearchLatencySlowBurn
+    exp_alerts: []
+  - eval_time: 9h15m
+    alertname: KbSearchLatencySlowBurn
+    exp_alerts:
+    - exp_labels:
+        service: svcdesk
+        slo: latency
+        severity: P3
+      exp_annotations:
+        summary: /kb/search has been slower than 0.2 s for 6 % of requests over 6 hours; a ticket, not a page.

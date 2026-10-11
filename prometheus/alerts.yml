@@ -1,0 +1,108 @@
+# ai-generated: 85% - Claude wrote the rules from MONITORING-SPEC.md M-17 to M-19 and my slo.md; I chose the objectives, burn rates and severities
+# prometheus/alerts.yml - multiwindow, multi-burn-rate SLO alerts for GET /kb/search (SRE Workbook, ch. 5).
+# Every alert compares two error ratios, a long and a short window, with the same constant threshold
+# burn_rate * (1 - objective), written in the alert itself (M-18). Objectives and windows are declared in slo.md.
+groups:
+  - name: svcdesk-slo
+    rules:
+      # ---- availability: objective 0.995; a 5xx answer is bad, a 4xx (a refused q) is not counted at all ----
+      - alert: KbSearchAvailabilityFastBurn
+        expr: |
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[1h]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code!~"4.."}[1h]))
+          ) > 14.4 * (1 - 0.995)
+          and
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[5m]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code!~"4.."}[5m]))
+          ) > 14.4 * (1 - 0.995)
+        for: 2m
+        labels:
+          service: svcdesk
+          slo: availability
+          severity: P1
+        annotations:
+          summary: "/kb/search is failing 14x faster than its 0.5 % error budget allows: 2 % of the 30-day budget gone in the last hour. Check kb-index (/stats) and svcdesk's 502s."
+
+      - alert: KbSearchAvailabilitySlowBurn
+        expr: |
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[6h]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code!~"4.."}[6h]))
+          ) > 6 * (1 - 0.995)
+          and
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[30m]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code!~"4.."}[30m]))
+          ) > 6 * (1 - 0.995)
+        for: 5m
+        labels:
+          service: svcdesk
+          slo: availability
+          severity: P2
+        annotations:
+          summary: "/kb/search errors have burned 5 % of the 30-day availability budget in 6 hours; look at it during working hours."
+
+      # ---- latency: objective 0.99 of /kb/search answers within 0.2 s (le="0.2", a boundary of the ladder) ----
+      - alert: KbSearchLatencyFastBurn
+        expr: |
+          (
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[1h]))
+                -
+              sum(rate(http_server_request_duration_seconds_bucket{job="svcdesk", http_route="/kb/search", le="0.2"}[1h]))
+            )
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[1h]))
+          ) > 14.4 * (1 - 0.99)
+          and
+          (
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[5m]))
+                -
+              sum(rate(http_server_request_duration_seconds_bucket{job="svcdesk", http_route="/kb/search", le="0.2"}[5m]))
+            )
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[5m]))
+          ) > 14.4 * (1 - 0.99)
+        for: 2m
+        labels:
+          service: svcdesk
+          slo: latency
+          severity: P2
+        annotations:
+          summary: "More than 14 % of /kb/search answers are slower than 0.2 s: kb-index is degraded; searches still answer."
+
+      - alert: KbSearchLatencySlowBurn
+        expr: |
+          (
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[6h]))
+                -
+              sum(rate(http_server_request_duration_seconds_bucket{job="svcdesk", http_route="/kb/search", le="0.2"}[6h]))
+            )
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[6h]))
+          ) > 6 * (1 - 0.99)
+          and
+          (
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[30m]))
+                -
+              sum(rate(http_server_request_duration_seconds_bucket{job="svcdesk", http_route="/kb/search", le="0.2"}[30m]))
+            )
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[30m]))
+          ) > 6 * (1 - 0.99)
+        for: 5m
+        labels:
+          service: svcdesk
+          slo: latency
+          severity: P3
+        annotations:
+          summary: "/kb/search has been slower than 0.2 s for 6 % of requests over 6 hours; a ticket, not a page."
