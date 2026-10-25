@@ -1,0 +1,22 @@
+# ai-generated: 80% - Claude wrote the cases from my rules; the pair proves the equal-labels pitfall both ways
+# alertmanager/routing-tests.yml - the cases that prove the routing tree (INCIDENT-SPEC.md I-06 to I-08).
+routes:
+  - labels: {alertname: CheckoutLatencyHigh, service: checkout, severity: P1, cluster: shop}
+    receivers: [pager]
+  - labels: {alertname: ShippingLatencyHigh, service: shipping, severity: P2, cluster: shop}
+    receivers: [chat]
+  - labels: {alertname: AdErrorRate, service: ad, severity: P3, cluster: shop}
+    receivers: [chat]
+  - labels: {alertname: KbSearchAvailabilityFastBurn, service: svcdesk, slo: availability, severity: P1}
+    receivers: [pager]
+  - labels: {alertname: KbSearchLatencySlowBurn, service: svcdesk, slo: latency, severity: P3}
+    receivers: [chat]
+inhibitions:
+  # A shop page mutes the shop's own chat alerts...
+  - source: {alertname: CheckoutLatencyHigh, service: checkout, severity: P1, cluster: shop}
+    target: {alertname: ShippingLatencyHigh, service: shipping, severity: P2, cluster: shop}
+    inhibited: true
+  # ...but not an alert of another cluster: the pair that differs only in `cluster`, the label in `equal`.
+  - source: {alertname: CheckoutLatencyHigh, service: checkout, severity: P1, cluster: shop}
+    target: {alertname: ShippingLatencyHigh, service: shipping, severity: P2, cluster: staging}
+    inhibited: false

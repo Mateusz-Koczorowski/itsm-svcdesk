@@ -1,0 +1,60 @@
+{
+  "investigator": {
+    "agent": "course agent loop (agent/agent.py), recorded investigation lab4-rec-1",
+    "model": "qwen3:4b-instruct",
+    "mcp_server": "prom_mcp.py (mcp 2.2.0)",
+    "transcript": "ai-rca/transcript.md"
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "hypothesis": "The checkout service's span \"POST /api/checkout\" shows a significant increase in call count from 153 to 378 over the time window, indicating a high volume of requests, but this does not point to a failure; rather, it suggests high load, which is a contributing factor to latency.",
+      "component": "frontend",
+      "predicts": "sum(rate(traces_span_metrics_calls_total{span_name=\"POST /api/checkout\"}[5m])) > 1.5 * sum(rate(traces_span_metrics_calls_total{span_name=\"POST /api/checkout\"}[5m] offset 10m))",
+      "at": "2026-10-12T05:07:00Z",
+      "result": false,
+      "verdict": "hallucinated",
+      "evidence": "The checkout requests did not grow: POST /api/checkout ran at about 0.2/s at 05:07 against about 0.3/s ten minutes earlier, so the ratio is about 0.7, not above 1.5. The agent read cumulative counters (153 to 378) as a rise in load; the load generator's traffic was flat through the incident."
+    },
+    {
+      "id": "H2",
+      "hypothesis": "The span \"oteldemo.ProductCatalogService/GetProduct\" shows increasing duration from 85 to 344 milliseconds, and its call count grows from 85 to 344, indicating that the product catalog service is becoming increasingly slow, which may be a bottleneck in the checkout flow.",
+      "component": "product-catalog",
+      "predicts": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"product-catalog\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"oteldemo.ProductCatalogService/GetProduct\"}[5m]))) > 100",
+      "at": "2026-10-12T05:07:00Z",
+      "result": false,
+      "verdict": "hallucinated",
+      "evidence": "GetProduct's p95 was 34 ms at 05:07, the same as on the baseline (32 ms at 04:56). The catalog was not slow; '85 to 344' are call counts the agent read as durations."
+    },
+    {
+      "id": "H3",
+      "hypothesis": "The span \"oteldemo.CheckoutService/PlaceOrder\" has call counts rising from 51 to 182 and duration increasing from 80 to 182 milliseconds, which shows a steady rise in latency, indicating it may be the primary service responsible for high checkout latency.",
+      "component": "checkout",
+      "predicts": "histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"checkout\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"oteldemo.CheckoutService/PlaceOrder\"}[5m]))) > 2000 unless on() histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"shipping\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"POST /ship-order\"}[5m]))) < 1000",
+      "at": "2026-10-12T05:07:00Z",
+      "result": true,
+      "verdict": "partially_correct",
+      "evidence": "Right component, wrong mechanism and wrong numbers. PlaceOrder's p99 was 8.8 s at 05:07 (about 50 ms at 04:56), so checkout latency was real; but the delay came from shipping's ShipOrder (p99 8.85 s at the same instant), not from checkout's own logic, and nothing rose 'from 80 to 182 ms'. The query returns PlaceOrder's p99 only while ShipOrder is slow too: true at 05:07, empty on the baseline."
+    },
+    {
+      "id": "H4",
+      "hypothesis": "The span \"prepareOrderItemsAndShippingQuoteFromCart\" is internal and has a consistent duration increase from 80 to 182 milliseconds, suggesting a growing processing delay in the internal service logic and likely being a root cause of checkout latency.",
+      "component": "checkout",
+      "predicts": "histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"checkout\", span_name=\"prepareOrderItemsAndShippingQuoteFromCart\"}[5m]))) > 1000",
+      "at": "2026-10-12T05:07:00Z",
+      "result": false,
+      "verdict": "hallucinated",
+      "evidence": "prepareOrderItemsAndShippingQuoteFromCart stayed at a p99 of about 50 ms at 05:07, unchanged from the baseline. The slow step was the later ShipOrder call, not the quote; the agent's final 'root cause' is contradicted by the data."
+    },
+    {
+      "id": "H5",
+      "hypothesis": "Hypothesis based on duration metrics: The span \"oteldemo.PaymentService/Charge\" is not visible in the metrics, but its absence in the response suggests it might have failed, though no status_code=STATUS_CODE_ERROR was present; thus, this is not confirmed.",
+      "component": "payment",
+      "predicts": "sum(rate(traces_span_metrics_calls_total{service_name=\"payment\", span_kind=\"SPAN_KIND_SERVER\"}[5m])) < 0.01",
+      "at": "2026-10-12T05:07:00Z",
+      "result": false,
+      "verdict": "hallucinated",
+      "evidence": "Payment kept serving: its SERVER spans ran at 0.1/s at 05:07 (0.15/s on the baseline), and it had no error spans. The agent took its own failed queries as the payment service's absence."
+    }
+  ]
+}
