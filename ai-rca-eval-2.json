@@ -1,0 +1,50 @@
+{
+  "investigator": {
+    "agent": "course agent loop (agent/agent.py), run by me on the served recording lab4-rec-1",
+    "model": "gemini-flash-lite-latest",
+    "mcp_server": "prom_mcp.py (mcp 2.2.0)",
+    "transcript": "ai-rca/second/transcript.md"
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "hypothesis": "The checkout service experienced severe p95 latency spikes reaching up to 5,500 ms around 05:15Z, compared to a baseline of ~48 ms before 05:00Z.",
+      "component": "checkout",
+      "predicts": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"checkout\", span_kind=\"SPAN_KIND_SERVER\"}[5m]))) > 1000",
+      "at": "2026-10-12T05:05:00Z",
+      "result": true,
+      "verdict": "partially_correct",
+      "evidence": "The magnitude and the baseline are right, the time is not. Checkout's server p95 was 48 ms at 04:56 and 5,500 ms at 05:05 (the query returns 5500 at that instant, nothing on the baseline), but at 05:15 it was back to 48 ms: the agent misread the timestamps of its own range query, whose 5,500 ms point is 05:05. It also restates what the paging alert ShopCheckoutSlow already said and names no cause, so it locates the symptom, not the fault."
+    },
+    {
+      "id": "H2",
+      "hypothesis": "The upstream frontend and frontend-proxy services also experienced corresponding p95 latency degradation up to ~62 ms during the same window.",
+      "component": "checkout",
+      "predicts": "histogram_quantile(0.95, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=~\"frontend|frontend-proxy\", span_kind=\"SPAN_KIND_SERVER\"}[5m]))) > 55",
+      "at": "2026-10-12T05:08:00Z",
+      "result": true,
+      "verdict": "partially_correct",
+      "evidence": "True as measured, small in effect. The frontend's p95 rose from about 41 ms on the baseline to 63 ms at 05:08 (frontend-proxy 42 to 60 ms), so the query returns both services at 05:08 and nothing at 04:56. But the rise is 20 ms against checkout's 5 s: orders are a small share of the frontend's requests, and the frontend only carries checkout's slowness to the customer. The component this implicates is therefore checkout, as a victim's view of it, not the frontend; no fault sat in the frontend."
+    },
+    {
+      "id": "H3",
+      "hypothesis": "Within the checkout service, internal spans like order item preparation remained fast at ~48 ms, while downstream HTTP POST client calls spiked significantly in duration during the incident window.",
+      "component": "shipping",
+      "predicts": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"checkout\", span_kind=\"SPAN_KIND_CLIENT\", span_name=\"POST\"}[5m]))) > 50 and on() histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"checkout\", span_name=\"prepareOrderItemsAndShippingQuoteFromCart\"}[5m]))) < 100",
+      "at": "2026-10-12T05:07:00Z",
+      "result": true,
+      "verdict": "partially_correct",
+      "evidence": "Right, and the only hypothesis that points away from checkout's own code: prepareOrderItemsAndShippingQuoteFromCart stayed at 48 ms p95 throughout, while checkout's outgoing HTTP POST calls went from 9 ms p95 on the baseline to 94 ms at 05:07 (their p99 from about 40 ms to 7.3 s at 05:05). The query returns 94 at 05:07 and nothing at 04:56. It stops one step short: checkout's HTTP POST clients go to shipping (ship-order) and to email (send_order_confirmation), and the agent did not ask which; shipping's POST /ship-order p99 of 8.2 s shows the slow call was the shipment."
+    },
+    {
+      "id": "H4",
+      "hypothesis": "The email service experienced concurrent p95 latency increases up to ~148 ms during the incident, which correlates with the outbound order confirmation processing from checkout.",
+      "component": "email",
+      "predicts": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"email\", span_kind=\"SPAN_KIND_SERVER\"}[5m]))) > 100",
+      "at": "2026-10-12T05:08:00Z",
+      "result": true,
+      "verdict": "correct",
+      "evidence": "Correct, and beyond what the alerts said: no alert named email. Its server p95 was about 8 ms on the baseline and 148 ms at 05:08, back to 9 ms by 05:15; the query returns 148 at 05:08 and nothing at 04:56. The confirmation-email request rate did not change, so it is not load: it matches the email container's memory climbing to 100.5 MB of its 104.9 MB limit in the same minutes, a leak that grows with each confirmation sent. The agent saw the effect and the right request path without reaching the memory metric."
+    }
+  ]
+}
